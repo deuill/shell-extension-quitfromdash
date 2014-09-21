@@ -121,37 +121,67 @@ function enable() {
 	quitfromDashInjections['_onActivate'] = undefined;
 
 	quitfromDashInjections['_redisplay'] = injectToFunction(AppDisplay.AppIconMenu.prototype, '_redisplay', function() {
+
 		this.removeAll();
 
-		let appWindows = this._source.app.get_windows();
+		let windows = this._source.app.get_windows().filter(function(w) {
+				return !w.skip_taskbar;
+		});
 
 		// Display the app windows menu items and the separator between windows
 		// of the current desktop and other windows.
 		let activeWorkspace = global.screen.get_active_workspace();
-		let separatorShown = appWindows.length > 0 && appWindows[0].get_workspace() != activeWorkspace;
+		let separatorShown = windows.length > 0 && windows[0].get_workspace() != activeWorkspace;
 
-		for (let i = 0; i < appWindows.length; i++) {
-			if (!separatorShown && appWindows[i].get_workspace() != activeWorkspace) {
-				this._appendSeparator();
-				separatorShown = true;
-			}
-
-			let menuItem = new PopupButtonMenuItem(appWindows[i].title, "edit-delete-symbolic", {});
-			menuItem._windowactor = appWindows[i];
-			this.addMenuItem(menuItem);
+		for (let i = 0; i < windows.length; i++) {
+				let window = windows[i];
+				if (!separatorShown && window.get_workspace() != activeWorkspace) {
+						this._appendSeparator();
+						separatorShown = true;
+				}
+				let item = this._appendMenuItem(window.title);
+				item.connect('activate', Lang.bind(this, function() {
+						this.emit('activate-window', window);
+				}));
 		}
 
 		if (!this._source.app.is_window_backed()) {
-			if (appWindows.length > 0) {
 				this._appendSeparator();
-			}
 
-			let isFavorite = AppFavorites.getAppFavorites().isFavorite(this._source.app.get_id());
+				this._newWindowMenuItem = this._appendMenuItem(_("New Window"));
+				this._newWindowMenuItem.connect('activate', Lang.bind(this, function() {
+						this._source.app.open_new_window(-1);
+						this.emit('activate-window', null);
+				}));
+				this._appendSeparator();
 
-			this._newWindowMenuItem = this._appendMenuItem(_("New Window"));
-			this._appendSeparator();
+				let appInfo = this._source.app.get_app_info();
+				let actions = appInfo.list_actions();
+				for (let i = 0; i < actions.length; i++) {
+						let action = actions[i];
+						let item = this._appendMenuItem(appInfo.get_action_name(action));
+						item.connect('activate', Lang.bind(this, function(emitter, event) {
+								this._source.app.launch_action(action, event.get_time(), -1);
+								this.emit('activate-window', null);
+						}));
+				}
+				this._appendSeparator();
 
-			this._toggleFavoriteMenuItem = this._appendMenuItem(isFavorite ? _("Remove from Favorites") : _("Add to Favorites"));
+				let isFavorite = AppFavorites.getAppFavorites().isFavorite(this._source.app.get_id());
+
+				if (isFavorite) {
+						let item = this._appendMenuItem(_("Remove from Favorites"));
+						item.connect('activate', Lang.bind(this, function() {
+								let favs = AppFavorites.getAppFavorites();
+								favs.removeFavorite(this._source.app.get_id());
+						}));
+				} else {
+						let item = this._appendMenuItem(_("Add to Favorites"));
+						item.connect('activate', Lang.bind(this, function() {
+								let favs = AppFavorites.getAppFavorites();
+								favs.addFavorite(this._source.app.get_id());
+						}));
+				}
 		}
 
 		let app = this._source.app;
@@ -159,37 +189,29 @@ function enable() {
 
 		this._quitfromDashMenuItem = undefined;
 
-		if (count == 1) {
+		if ( count > 0) {
+
 			this._appendSeparator();
-			this._quitfromDashMenuItem = this._appendMenuItem(_("Quit")); 
-		} else if (count > 1) {
-			this._appendSeparator();
-			this._quitfromDashMenuItem = this._appendMenuItem(_("Quit " + count + " Windows")); 
+			let quitFromDashMenuText = "";
+			if (count == 1)
+				quitFromDashMenuText = _("Quit"); 
+			else
+				quitFromDashMenuText = _("Quit " + count + " Windows"); 
+
+			this._quitfromDashMenuItem = this._appendMenuItem(quitFromDashMenuText); 
+			this._quitfromDashMenuItem.connect('activate', Lang.bind(this, function() {
+				let app = this._source.app;
+				let windows = app.get_windows();
+
+				for (let i = 0; i < windows.length; i++) {
+					closeWindowInstance(windows[i])
+				}
+			}));
+
 		}
 	});
 
-	quitfromDashInjections['_onActivate'] = injectToFunction(AppDisplay.AppIconMenu.prototype, '_onActivate', function(actor, child) {
-		if (child == this._quitfromDashMenuItem) {
-			let app = this._source.app;
-			let windows = app.get_windows();
-		
-			for (let i = 0; i < windows.length; i++) {
-				closeWindowInstance(windows[i]);
-			}
-		}
-		
-		if (child._windowactor) {
-			if (child._button_active == true) {
-				let metaWindow = child._windowactor;
-				closeWindowInstance(metaWindow);
-			} else {
-				let metaWindow = child._windowactor;
-				this.emit('activate-window', metaWindow);
-			}
-		}
-	});
 }
-	
 
 function disable() {
 	for (i in quitfromDashInjections) {
@@ -202,3 +224,4 @@ function disable() {
 function init() {
 	/* do nothing */
 }
+
